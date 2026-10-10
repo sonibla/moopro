@@ -68,7 +68,7 @@ class _FakeDomainRepository extends DomainRepository {
   Stream<ldb.Setting?> watchSetting(String id) => Stream.value(null);
 
   @override
-  Future<PullResult> syncNow() async =>
+  Future<PullResult> syncNow({bool force = false}) async =>
       const PullResult(recordsApplied: 0, rollbackWarnings: []);
 
   @override

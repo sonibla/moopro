@@ -105,7 +105,7 @@ class _FakeDomainRepositoryForAttach extends DomainRepository {
       );
 
   @override
-  Future<PullResult> syncNow() async =>
+  Future<PullResult> syncNow({bool force = false}) async =>
       const PullResult(recordsApplied: 0, rollbackWarnings: []);
 }
 

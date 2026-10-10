@@ -71,7 +71,7 @@ class _FakeDomainRepository extends DomainRepository {
   int syncNowCalls = 0;
 
   @override
-  Future<PullResult> syncNow() async {
+  Future<PullResult> syncNow({bool force = false}) async {
     syncNowCalls++;
     return const PullResult(recordsApplied: 0, rollbackWarnings: []);
   }

@@ -8,6 +8,7 @@ import '../api/misc_api.dart';
 import '../api/models.dart';
 import '../api/vault_api.dart';
 import '../auth/vault_session.dart';
+import 'auth_controller.dart' show AuthOfflineReady, authControllerProvider;
 import '../crypto/local_unlock_store.dart';
 import '../crypto/local_vault_key_material_store.dart';
 import '../db/database.dart';
@@ -145,6 +146,7 @@ final domainRepositoryProvider = Provider<DomainRepository>((ref) {
     syncEngine: ref.watch(syncEngineProvider),
     balanceEngine: ref.watch(balanceEngineProvider),
     vaultSession: ref.watch(vaultSessionManagerProvider),
+    canSync: () => ref.read(authControllerProvider) is! AuthOfflineReady,
     onSyncConflict: (conflicts) =>
         ref.read(syncConflictMessageProvider.notifier).state =
             VaultConflictException(conflicts).toString(),

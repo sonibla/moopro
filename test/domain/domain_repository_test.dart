@@ -108,12 +108,29 @@ class FixedDekVaultSession extends VaultSessionManager {
   Uint8List? get currentDek => _dek;
 }
 
+class _CountingVaultApi extends FakeVaultApi {
+  int calls = 0;
+
+  @override
+  Future<List<VaultRecordResponse>> pull({required int sinceVersion}) {
+    calls++;
+    return super.pull(sinceVersion: sinceVersion);
+  }
+
+  @override
+  Future<List<VaultRecordResponse>> push(List<VaultRecordUpsert> records) {
+    calls++;
+    return super.push(records);
+  }
+}
+
 DomainRepository _buildRepository(
   AppDatabase syncDb,
   DomainCacheDatabase cacheDb,
   VaultApi vaultApi,
-  Uint8List dek,
-) {
+  Uint8List dek, {
+  bool Function()? canSync,
+}) {
   final syncEngine = SyncEngine(db: syncDb, vaultApi: vaultApi);
   final balanceEngine = BalanceEngine(cacheDb);
   final vaultSession = FixedDekVaultSession(dek);
@@ -123,6 +140,7 @@ DomainRepository _buildRepository(
     syncEngine: syncEngine,
     balanceEngine: balanceEngine,
     vaultSession: vaultSession,
+    canSync: canSync ?? () => true,
   );
 }
 
@@ -2692,6 +2710,60 @@ void main() {
 
       await offlineDb.close();
       await offlineCacheDb.close();
+    });
+  });
+
+  group('offline-only vault (canSync false)', () {
+    late _CountingVaultApi api;
+    late DomainRepository offlineRepo;
+
+    setUp(() {
+      api = _CountingVaultApi();
+      offlineRepo = _buildRepository(
+        db,
+        cacheDb,
+        api,
+        dek,
+        canSync: () => false,
+      );
+    });
+
+    test(
+      'syncNow never contacts the server and reports nothing pulled',
+      () async {
+        final result = await offlineRepo.syncNow();
+
+        expect(api.calls, 0);
+        expect(result.recordsApplied, 0);
+        expect(result.conflicts, isEmpty);
+      },
+    );
+
+    test('a local write stays dirty and triggers no server call', () async {
+      await offlineRepo.createAsset(
+        kind: AssetKind.fiat,
+        symbol: 'EUR',
+        name: 'Euro',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(api.calls, 0);
+      final rows = await db.select(db.localVaultRecords).get();
+      expect(rows, isNotEmpty);
+      expect(rows.every((r) => r.dirty), isTrue);
+    });
+
+    test('force: true still syncs, for the attach-to-account flow', () async {
+      await offlineRepo.createAsset(
+        kind: AssetKind.fiat,
+        symbol: 'EUR',
+        name: 'Euro',
+      );
+      await offlineRepo.syncNow(force: true);
+
+      expect(api.calls, greaterThan(0));
+      final rows = await db.select(db.localVaultRecords).get();
+      expect(rows.every((r) => !r.dirty), isTrue);
     });
   });
 

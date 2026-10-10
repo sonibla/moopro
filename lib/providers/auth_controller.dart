@@ -415,7 +415,7 @@ class AuthController extends StateNotifier<AuthFlowState> {
       throw const AccountAlreadyHasVaultException();
     }
     await _vaultSession.rewrapDekAfterPasswordChange(newPassword: password);
-    await ref.read(domainRepositoryProvider).syncNow();
+    await ref.read(domainRepositoryProvider).syncNow(force: true);
     await _vaultSession.clearLocalOfflineVault();
     final active = ref.read(activeVaultProvider);
     if (active != null) {

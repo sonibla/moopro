@@ -31,6 +31,8 @@ class DomainRepository {
 
   final void Function(List<VaultRecordConflict> conflicts)? onSyncConflict;
 
+  final bool Function() canSync;
+
   DomainRepository({
     required this.syncDb,
     required this.cacheDb,
@@ -38,7 +40,10 @@ class DomainRepository {
     required this.balanceEngine,
     required this.vaultSession,
     this.onSyncConflict,
+    this.canSync = _alwaysCanSync,
   });
+
+  static bool _alwaysCanSync() => true;
 
   Uint8List get _dek {
     final dek = vaultSession.currentDek;
@@ -61,7 +66,12 @@ class DomainRepository {
     return result;
   }
 
-  Future<PullResult> syncNow() {
+  Future<PullResult> syncNow({bool force = false}) {
+    if (!force && !canSync()) {
+      return Future.value(
+        const PullResult(recordsApplied: 0, rollbackWarnings: []),
+      );
+    }
     return _serialized(() async {
       final result = await syncEngine.sync();
       await applyPulledRecords(result.appliedRecords);
