@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=moopro
+Comment=End-to-end encrypted money & investment tracker
+Exec=/opt/moopro/moopro
+Icon=/opt/moopro/moopro.png
+Terminal=false
+Categories=Office;Finance;
+StartupWMClass=moopro

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description"
+    content="moopro | An open source end-to-end encrypted app for tracking and planning your money and investments. money & investment tracker.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="moopro">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png" />
+
+  <title>moopro</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    :root {
+      /* Mirrors AppTheme light tokens: paper, ink, accentSoft, accent */
+      --scaffold-background: rgb(246, 243, 236);
+      --text: rgb(27, 35, 51);
+      --loading-indicator-background: rgb(243, 228, 195);
+      --loading-indicator: rgb(149, 96, 15);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        /* Mirrors AppTheme dark tokens */
+        --scaffold-background: rgb(0, 0, 0);
+        --text: rgb(237, 232, 221);
+        --loading-indicator-background: rgb(74, 59, 31);
+        --loading-indicator: rgb(217, 164, 78);
+      }
+    }
+
+    /* Set body background to match theme to prevent a flash */
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--scaffold-background);
+      transition: background-color 0.3s ease;
+    }
+
+    .loading-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: var(--scaffold-background);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      z-index: 9999;
+      transition: all 0.3s ease;
+    }
+
+    .loading-container.fade-content {
+      background-color: transparent;
+    }
+
+    .loading-container.fade-content .progress-container {
+      opacity: 0;
+    }
+
+    .progress-container {
+      position: relative;
+      width: 120px;
+      height: 120px;
+      margin-bottom: 30px;
+      transition: opacity 0.3s ease;
+    }
+
+    .progress-ring {
+      transform: rotate(-90deg);
+      width: 120px;
+      height: 120px;
+    }
+
+    .progress-ring-bg {
+      fill: none;
+      stroke: var(--loading-indicator-background);
+      stroke-width: 8;
+    }
+
+    .progress-ring-fill {
+      fill: none;
+      stroke: var(--loading-indicator);
+      stroke-width: 8;
+      stroke-linecap: round;
+      stroke-dasharray: 314; /* 2 * π * 50 (radius) */
+      stroke-dashoffset: 314; /* animated from flutter_bootstrap.js */
+    }
+
+    .progress-info {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .progress-spinner {
+      width: 8px;
+      height: 8px;
+      border: 2px solid transparent;
+      border-top: 2px solid var(--text);
+      border-radius: 50%;
+      animation: spin 1.2s linear infinite;
+      opacity: 0.8;
+    }
+
+    .progress-percentage {
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="loading" class="loading-container">
+    <div class="progress-container">
+      <svg class="progress-ring">
+        <circle class="progress-ring-bg" cx="60" cy="60" r="50"></circle>
+        <circle class="progress-ring-fill" cx="60" cy="60" r="50" id="progress-circle"></circle>
+      </svg>
+      <div class="progress-info">
+        <div class="progress-spinner" id="progress-spinner"></div>
+        <div class="progress-percentage" id="progress-percentage">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+
+</html>

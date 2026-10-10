@@ -1,0 +1,169 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: "3.44.8"
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter test --coverage
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage
+          path: coverage/lcov.info
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: [analyze, test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Android
+            os: ubuntu-latest
+            command: flutter build apk --release
+            asset: moopro-android.apk
+          - name: Web
+            os: ubuntu-latest
+            command: flutter build web --release
+            asset: moopro-web.zip
+          - name: Linux
+            os: ubuntu-latest
+            command: flutter build linux --release
+            asset: moopro-linux-x64.tar.gz
+            linux-deps: true
+          - name: Windows
+            os: windows-latest
+            command: flutter build windows --release
+            asset: moopro-windows-x64.zip
+          - name: macOS
+            os: macos-latest
+            command: flutter build macos --release
+            asset: moopro-macos.zip
+          - name: iOS
+            os: macos-latest
+            command: flutter build ios --release --no-codesign
+            asset: moopro-ios-unsigned.zip
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux build dependencies
+        if: matrix.linux-deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libsecret-1-dev libjsoncpp-dev
+
+      - uses: actions/setup-java@v5
+        if: matrix.name == 'Android'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # local_auth_windows (still true in 2.0.2) compiles with /await, which the
+      # MSVC on current windows-latest images rejects unless this is defined.
+      # Drop once the plugin moves to C++20 <coroutine>.
+      - name: Silence MSVC experimental-coroutine error
+        if: runner.os == 'Windows'
+        run: echo "CL=/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS" >> $env:GITHUB_ENV
+
+      - run: flutter pub get
+      - run: ${{ matrix.command }}
+
+      # Package here (not at publish time): artifact upload drops file modes
+      # and symlinks, which Linux bundles and macOS .app bundles need.
+      - name: Package
+        shell: bash
+        run: |
+          mkdir dist
+          case "${{ matrix.name }}" in
+            Android) cp build/app/outputs/flutter-apk/app-release.apk dist/${{ matrix.asset }} ;;
+            Web) (cd build/web && zip -r "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}" .) ;;
+            Linux) tar -czf dist/${{ matrix.asset }} -C build/linux/x64/release/bundle . ;;
+            Windows) 7z a -tzip dist/${{ matrix.asset }} ./build/windows/x64/runner/Release/* ;;
+            macOS) ditto -c -k --keepParent build/macos/Build/Products/Release/moopro.app dist/${{ matrix.asset }} ;;
+            iOS*) ditto -c -k --keepParent build/ios/iphoneos/Runner.app dist/${{ matrix.asset }} ;;
+          esac
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          retention-days: 7
+
+  # Rolling pre-release: the "nightly" tag is recreated on every push to main
+  # so https://github.com/<owner>/<repo>/releases/download/nightly/<asset>
+  # always serves the latest build (e.g. moopro-android.apk). No versioning
+  # to maintain. The unsigned iOS build is not published (not installable).
+  publish-nightly:
+    name: Publish nightly release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: moopro-*
+          path: dist
+          merge-multiple: true
+      - name: Replace the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          rm -f dist/moopro-ios-unsigned.zip
+          ls -l dist
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly dist/* \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Nightly (latest main)" \
+            --notes "Automated build of commit $GITHUB_SHA. Debug-signed/unsigned; for testing only."
