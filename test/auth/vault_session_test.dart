@@ -55,28 +55,35 @@ void main() {
 
   tearDown(() => db.close());
 
+  const slowKdf = Timeout(Duration(minutes: 3));
+
   group('offline vault', () {
     test('hasLocalOfflineVault is false before any setup', () async {
       expect(await session.hasLocalOfflineVault(), isFalse);
     });
 
-    test('completeOfflineVaultSetup then unlockOffline with the same password '
-        'recovers the same DEK', () async {
-      await session.completeOfflineVaultSetup(password: 'hunter2');
-      final dekAfterSetup = session.currentDek;
-      expect(dekAfterSetup, isNotNull);
-      expect(await session.hasLocalOfflineVault(), isTrue);
+    test(
+      'completeOfflineVaultSetup then unlockOffline with the same password '
+      'recovers the same DEK',
+      timeout: slowKdf,
+      () async {
+        await session.completeOfflineVaultSetup(password: 'hunter2');
+        final dekAfterSetup = session.currentDek;
+        expect(dekAfterSetup, isNotNull);
+        expect(await session.hasLocalOfflineVault(), isTrue);
 
-      session.lock();
-      expect(session.currentDek, isNull);
+        session.lock();
+        expect(session.currentDek, isNull);
 
-      await session.unlockOffline(password: 'hunter2');
+        await session.unlockOffline(password: 'hunter2');
 
-      expect(session.currentDek, equals(dekAfterSetup));
-    });
+        expect(session.currentDek, equals(dekAfterSetup));
+      },
+    );
 
     test(
       'unlockOffline with the wrong password throws and leaves the vault locked',
+      timeout: slowKdf,
       () async {
         await session.completeOfflineVaultSetup(password: 'hunter2');
         session.lock();
@@ -97,14 +104,18 @@ void main() {
       );
     });
 
-    test('clearLocalOfflineVault removes the local key material', () async {
-      await session.completeOfflineVaultSetup(password: 'hunter2');
-      expect(await session.hasLocalOfflineVault(), isTrue);
+    test(
+      'clearLocalOfflineVault removes the local key material',
+      timeout: slowKdf,
+      () async {
+        await session.completeOfflineVaultSetup(password: 'hunter2');
+        expect(await session.hasLocalOfflineVault(), isTrue);
 
-      await session.clearLocalOfflineVault();
+        await session.clearLocalOfflineVault();
 
-      expect(await session.hasLocalOfflineVault(), isFalse);
-    });
+        expect(await session.hasLocalOfflineVault(), isFalse);
+      },
+    );
   });
 
   group('attach simulation', () {
@@ -112,6 +123,7 @@ void main() {
       'rewrapDekAfterPasswordChange re-wraps the same DEK under a new '
       'password-derived KEK — the "attach" operation reuses this '
       'unchanged, so the new material must unwrap to the identical DEK',
+      timeout: slowKdf,
       () async {
         final authApi = _CapturingAuthApi();
         final attachSession = VaultSessionManager(
