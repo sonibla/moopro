@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -116,6 +117,7 @@ void main() {
     WidgetTester tester, {
     required _FakeAuthApi authApi,
     bool withKnownVault = false,
+    Future<void> Function(Uri url)? openUrl,
   }) async {
     final registry = VaultRegistry(
       VaultRegistryDatabase(NativeDatabase.memory()),
@@ -136,7 +138,7 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const MaterialApp(home: AuthEntryScreen()),
+        child: MaterialApp(home: AuthEntryScreen(openUrl: openUrl)),
       ),
     );
     await tester.pumpAndSettle();
@@ -408,6 +410,8 @@ void main() {
       find.widgetWithText(TextFormField, 'Confirm password'),
       'hunter22',
     );
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
     await tester.pumpAndSettle();
 
@@ -426,6 +430,8 @@ void main() {
         find.widgetWithText(TextFormField, 'Email'),
         'wants-in@example.com',
       );
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Request an account'));
       await tester.pumpAndSettle();
 
@@ -455,6 +461,8 @@ void main() {
       find.widgetWithText(TextFormField, 'Confirm password'),
       'hunter23',
     );
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
     await tester.pumpAndSettle();
 
@@ -489,6 +497,8 @@ void main() {
         find.widgetWithText(TextFormField, 'Confirm password'),
         'hunter22',
       );
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
       await tester.pumpAndSettle();
 
@@ -522,6 +532,8 @@ void main() {
         find.widgetWithText(TextFormField, 'Confirm password'),
         'hunter22',
       );
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
       await tester.pumpAndSettle();
 
@@ -573,5 +585,106 @@ void main() {
       container.read(authControllerProvider),
       isA<AuthNeedsVaultSelection>(),
     );
+  });
+  group('privacy policy consent', () {
+    Future<void> openRequestForm(
+      WidgetTester tester,
+      _FakeAuthApi authApi,
+    ) async {
+      await pump(tester, authApi: authApi);
+      await tester.tap(find.text('Request access'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email'),
+        'wants-in@example.com',
+      );
+    }
+
+    testWidgets('requesting access is blocked until the box is ticked', (
+      tester,
+    ) async {
+      final authApi = _FakeAuthApi()..registrationStatusEnabled = false;
+      await openRequestForm(tester, authApi);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Request an account'));
+      await tester.pumpAndSettle();
+
+      expect(authApi.requestAccountCalled, isFalse);
+      expect(find.text('You must accept the privacy policy'), findsOneWidget);
+
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Request an account'));
+      await tester.pumpAndSettle();
+
+      expect(authApi.requestAccountCalled, isTrue);
+      expect(find.text('You must accept the privacy policy'), findsNothing);
+    });
+
+    testWidgets('creating an account is blocked until the box is ticked', (
+      tester,
+    ) async {
+      final authApi = _FakeAuthApi()..registrationStatusEnabled = true;
+      final container = await pump(tester, authApi: authApi);
+      await tester.tap(find.text('Create an account'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email'),
+        'new@example.com',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'hunter22',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Confirm password'),
+        'hunter22',
+      );
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('You must accept the privacy policy'), findsOneWidget);
+      expect(
+        container.read(authControllerProvider),
+        isNot(isA<AuthNeedsVaultSetup>()),
+      );
+    });
+
+    testWidgets('the login form has no privacy checkbox', (tester) async {
+      await pump(tester, authApi: _FakeAuthApi());
+
+      expect(find.textContaining('privacy policy'), findsNothing);
+    });
+
+    testWidgets('tapping "privacy policy" opens the policy URL', (
+      tester,
+    ) async {
+      final opened = <Uri>[];
+      final authApi = _FakeAuthApi()..registrationStatusEnabled = false;
+      await pump(tester, authApi: authApi, openUrl: (u) async => opened.add(u));
+      await tester.tap(find.text('Request access'));
+      await tester.pumpAndSettle();
+
+      final richText = tester.widget<RichText>(
+        find
+            .descendant(
+              of: find.byType(CheckboxListTile),
+              matching: find.byType(RichText),
+            )
+            .first,
+      );
+      var found = false;
+      richText.text.visitChildren((span) {
+        if (span is TextSpan && span.text == 'privacy policy') {
+          (span.recognizer as TapGestureRecognizer).onTap!();
+          found = true;
+        }
+        return true;
+      });
+
+      expect(found, isTrue);
+      expect(opened, [Uri.parse('https://moopro.sonibla.com/#privacy')]);
+    });
   });
 }

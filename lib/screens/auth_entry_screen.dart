@@ -1,14 +1,20 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../crypto/local_unlock_gate.dart';
 import '../providers/auth_controller.dart';
 
 enum _AuthMode { login, register }
 
+const privacyPolicyUrl = 'https://moopro.sonibla.com/#privacy';
+
 class AuthEntryScreen extends ConsumerStatefulWidget {
-  const AuthEntryScreen({super.key});
+  const AuthEntryScreen({super.key, this.openUrl});
+
+  final Future<void> Function(Uri url)? openUrl;
 
   @override
   ConsumerState<AuthEntryScreen> createState() => _AuthEntryScreenState();
@@ -28,6 +34,10 @@ class _AuthEntryScreenState extends ConsumerState<AuthEntryScreen> {
   bool _registrationEnabled = true;
   bool _requestSent = false;
   bool _registerSubmitting = false;
+  bool _privacyAccepted = false;
+  late final TapGestureRecognizer _privacyTap = TapGestureRecognizer()
+    ..onTap = () =>
+        (widget.openUrl ?? _defaultOpenUrl)(Uri.parse(privacyPolicyUrl));
   String? _registerError;
 
   @override
@@ -49,8 +59,12 @@ class _AuthEntryScreenState extends ConsumerState<AuthEntryScreen> {
     } catch (_) {}
   }
 
+  static Future<void> _defaultOpenUrl(Uri url) =>
+      launchUrl(url, mode: LaunchMode.externalApplication);
+
   @override
   void dispose() {
+    _privacyTap.dispose();
     _emailController.dispose();
     _loginPasswordController.dispose();
     _totpController.dispose();
@@ -278,7 +292,57 @@ class _AuthEntryScreenState extends ConsumerState<AuthEntryScreen> {
                   : null,
             ),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          FormField<bool>(
+            initialValue: _privacyAccepted,
+            validator: (accepted) =>
+                accepted == true ? null : 'You must accept the privacy policy',
+            builder: (field) {
+              final theme = Theme.of(context);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: _privacyAccepted,
+                    onChanged: _registerSubmitting
+                        ? null
+                        : (value) {
+                            setState(() => _privacyAccepted = value ?? false);
+                            field.didChange(_privacyAccepted);
+                          },
+                    title: Text.rich(
+                      TextSpan(
+                        text: 'I accept the ',
+                        children: [
+                          TextSpan(
+                            text: 'privacy policy',
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              decoration: TextDecoration.underline,
+                            ),
+                            recognizer: _privacyTap,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (field.hasError)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Text(
+                        field.errorText!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 16),
           if (_registerError != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
