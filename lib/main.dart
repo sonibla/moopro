@@ -26,6 +26,7 @@ class MooproApp extends ConsumerWidget {
       _ => ThemeMode.system,
     };
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Moopro',
       scrollBehavior: const AppScrollBehavior(),
       theme: AppTheme.light(),
