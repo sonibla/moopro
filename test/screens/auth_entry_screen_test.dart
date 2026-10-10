@@ -492,7 +492,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('currently closed'), findsOneWidget);
+      expect(find.textContaining('waitlist-based'), findsOneWidget);
       expect(
         find.widgetWithText(FilledButton, 'Request an account'),
         findsOneWidget,

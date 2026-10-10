@@ -235,8 +235,7 @@ class _AuthEntryScreenState extends ConsumerState<AuthEntryScreen> {
   Widget _buildRegisterOrRequestForm(BuildContext context) {
     if (_requestSent) {
       return const Text(
-        'Thanks — we\'ve got your request and will be in touch once an '
-        'account is available.',
+        'Thanks! We\'ve got your request and will be in touch soon.',
         textAlign: TextAlign.center,
       );
     }
@@ -247,8 +246,7 @@ class _AuthEntryScreenState extends ConsumerState<AuthEntryScreen> {
         children: [
           if (!_registrationEnabled) ...[
             const Text(
-              'Account creation is currently closed on this server. Enter '
-              'your email and we\'ll be in touch if that changes.',
+              'Account creation is currently waitlist-based. Fill out the form below to request an account, and we\'ll contact you soon! In the meantime you can still use all features offline for free.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
