@@ -344,6 +344,9 @@ class AuthController extends StateNotifier<AuthFlowState> {
 
   Future<void> logout() async {
     final wasOffline = state is AuthOfflineReady;
+    if (ref.read(activeVaultProvider) != null) {
+      await ref.read(domainRepositoryProvider).awaitIdle();
+    }
     _vaultSession.lock();
     ref.invalidate(domainCacheDatabaseProvider);
     if (wasOffline) {
@@ -455,6 +458,7 @@ class AuthController extends StateNotifier<AuthFlowState> {
     final hadActiveVault = ref.read(activeVaultProvider) != null;
     state = selection;
     if (hadActiveVault) {
+      await ref.read(domainRepositoryProvider).awaitIdle();
       _vaultSession.lock();
       ref.invalidate(domainCacheDatabaseProvider);
       await ref.read(appDatabaseProvider).close();

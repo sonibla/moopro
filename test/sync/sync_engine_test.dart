@@ -534,6 +534,36 @@ void main() {
         expect(afterConflict['local1'], equals(RecordSyncStatus.conflicted));
       },
     );
+
+    test('watchConflictedRecords/watchPendingRecords list ids/types for '
+        'the Sync Status screen', () async {
+      await engine.stageLocalChange(
+        id: 'local2',
+        type: 'asset',
+        ciphertext: _bytes('v1'),
+        nonce: _bytes('local-nonce2'),
+      );
+
+      final pendingBefore = await engine.watchPendingRecords().first;
+      expect(pendingBefore.map((r) => r.id), contains('local2'));
+      expect(
+        pendingBefore.firstWhere((r) => r.id == 'local2').type,
+        equals('asset'),
+      );
+      expect(await engine.watchConflictedRecords().first, isEmpty);
+
+      await forceConflict();
+      await expectLater(engine.push(), throwsA(isA<VaultConflictException>()));
+
+      final conflicted = await engine.watchConflictedRecords().first;
+      expect(conflicted.map((r) => r.id), contains('local1'));
+      expect(
+        conflicted.firstWhere((r) => r.id == 'local1').type,
+        equals('transaction'),
+      );
+      final pendingAfter = await engine.watchPendingRecords().first;
+      expect(pendingAfter.map((r) => r.id), isNot(contains('local1')));
+    });
   });
 
   group('write coalescing (perf regression)', () {

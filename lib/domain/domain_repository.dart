@@ -22,6 +22,18 @@ class VaultNotEmptyException implements Exception {
   const VaultNotEmptyException();
 }
 
+class ConflictComparison {
+  final String type;
+  final Object? local;
+  final Object? server;
+
+  const ConflictComparison({
+    required this.type,
+    required this.local,
+    required this.server,
+  });
+}
+
 class DomainRepository {
   final ldb.AppDatabase syncDb;
   final cache.DomainCacheDatabase cacheDb;
@@ -66,6 +78,12 @@ class DomainRepository {
     return result;
   }
 
+  Future<void> awaitIdle() async {
+    try {
+      await _serialized(() async {});
+    } catch (_) {}
+  }
+
   Future<PullResult> syncNow({bool force = false}) {
     if (!force && !canSync()) {
       return Future.value(
@@ -74,12 +92,104 @@ class DomainRepository {
     }
     return _serialized(() async {
       final result = await syncEngine.sync();
+      for (final conflict in result.conflicts) {
+        final row = await (syncDb.select(
+          syncDb.localVaultRecords,
+        )..where((t) => t.id.equals(conflict.id))).getSingleOrNull();
+        if (row == null) continue;
+        final current = await _currentDomainValue(row.type, conflict.id);
+        if (current != null) {
+          _conflictLocalSnapshots[conflict.id] = current;
+        }
+      }
       await applyPulledRecords(result.appliedRecords);
       if (result.conflicts.isNotEmpty) {
         onSyncConflict?.call(result.conflicts);
       }
       return result;
     });
+  }
+
+  final Map<String, Object> _conflictLocalSnapshots = {};
+
+  Future<Object?> _currentDomainValue(String type, String id) async {
+    switch (type) {
+      case VaultRecordTypes.asset:
+        final row = await (cacheDb.select(
+          cacheDb.assets,
+        )..where((t) => t.id.equals(id))).getSingleOrNull();
+        return row == null ? null : _assetFromRow(row);
+      case VaultRecordTypes.container:
+        final row = await (cacheDb.select(
+          cacheDb.containers,
+        )..where((t) => t.id.equals(id))).getSingleOrNull();
+        return row == null
+            ? null
+            : MoneyContainer(
+                id: row.id,
+                name: row.name,
+                containerType: ContainerType.fromJson(row.containerType),
+                parentId: row.parentId,
+                icon: row.icon,
+              );
+      case VaultRecordTypes.transaction:
+        final row = await (cacheDb.select(
+          cacheDb.transactions,
+        )..where((t) => t.id.equals(id))).getSingleOrNull();
+        return row == null ? null : _transactionFromRow(row);
+      case VaultRecordTypes.priceSnapshot:
+        final row = await (cacheDb.select(
+          cacheDb.priceSnapshots,
+        )..where((t) => t.id.equals(id))).getSingleOrNull();
+        return row == null ? null : _priceSnapshotFromRow(row);
+      case VaultRecordTypes.setting:
+        final row = await (cacheDb.select(
+          cacheDb.settings,
+        )..where((t) => t.id.equals(id))).getSingleOrNull();
+        return row == null ? null : Setting(id: row.id, value: row.value);
+      default:
+        return null;
+    }
+  }
+
+  Future<ConflictComparison> loadConflictComparison(String id) async {
+    final row = await (syncDb.select(
+      syncDb.localVaultRecords,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
+    final type = row?.type ?? '';
+    final server = await _currentDomainValue(type, id);
+    return ConflictComparison(
+      type: type,
+      local: _conflictLocalSnapshots[id],
+      server: server,
+    );
+  }
+
+  Future<void> keepServerVersion(String id) async {
+    await syncEngine.acknowledgeConflict(id);
+    _conflictLocalSnapshots.remove(id);
+  }
+
+  Future<void> keepLocalVersion(String id) async {
+    final snapshot = _conflictLocalSnapshots[id];
+    if (snapshot == null) {
+      await keepServerVersion(id);
+      return;
+    }
+    _conflictLocalSnapshots.remove(id);
+    switch (snapshot) {
+      case Asset a:
+        await _writeAssetRecord(a, deleted: false);
+      case MoneyContainer c:
+        await _writeContainerRecord(c, deleted: false);
+      case MoneyTransaction t:
+        await updateTransaction(t);
+      case PriceSnapshot p:
+        await _writePriceSnapshotRecord(p, deleted: false);
+      case Setting s:
+        await _writeSettingRecord(s, deleted: false);
+    }
+    await syncEngine.acknowledgeConflict(id);
   }
 
   void _syncSoon() {
@@ -97,6 +207,12 @@ class DomainRepository {
 
   Future<void> acknowledgeConflict(String id) =>
       syncEngine.acknowledgeConflict(id);
+
+  Stream<List<ConflictedRecordRef>> watchConflictedRecords() =>
+      syncEngine.watchConflictedRecords();
+
+  Stream<List<PendingRecordRef>> watchPendingRecords() =>
+      syncEngine.watchPendingRecords();
 
   Future<bool> hasNewRemoteData() => syncEngine.hasNewRemoteData();
 
@@ -174,6 +290,7 @@ class DomainRepository {
   }
 
   Future<void> _doWriteAssetRecord(Asset asset, {required bool deleted}) async {
+    _conflictLocalSnapshots.remove(asset.id);
     final plaintext = Uint8List.fromList(
       utf8.encode(jsonEncode(asset.toJson())),
     );
@@ -315,6 +432,7 @@ class DomainRepository {
     MoneyContainer container, {
     required bool deleted,
   }) async {
+    _conflictLocalSnapshots.remove(container.id);
     final plaintext = Uint8List.fromList(
       utf8.encode(jsonEncode(container.toJson())),
     );
@@ -398,6 +516,7 @@ class DomainRepository {
     Setting setting, {
     required bool deleted,
   }) async {
+    _conflictLocalSnapshots.remove(setting.id);
     final plaintext = Uint8List.fromList(
       utf8.encode(jsonEncode(setting.toJson())),
     );
@@ -515,6 +634,7 @@ class DomainRepository {
     PriceSnapshot snapshot, {
     required bool deleted,
   }) async {
+    _conflictLocalSnapshots.remove(snapshot.id);
     final plaintext = Uint8List.fromList(
       utf8.encode(jsonEncode(snapshot.toJson())),
     );
@@ -1099,6 +1219,7 @@ class DomainRepository {
     required bool deleted,
     required bool stageForSync,
   }) async {
+    if (stageForSync) _conflictLocalSnapshots.remove(tx.id);
     var neutral = false;
     if (stageForSync && !deleted) {
       final existing = await (cacheDb.select(
@@ -1180,6 +1301,10 @@ class DomainRepository {
     List<_PendingWrite> writes,
   ) async {
     if (writes.isEmpty) return;
+
+    for (final write in writes) {
+      _conflictLocalSnapshots.remove(write.tx.id);
+    }
 
     await syncDb.transaction(() async {
       for (final write in writes) {

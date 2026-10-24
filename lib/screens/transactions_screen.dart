@@ -18,7 +18,7 @@ import '../widgets/drag_select_region.dart';
 import '../widgets/expandable_add_fab.dart';
 import '../widgets/now_marker.dart';
 import '../widgets/selection_stats_dialog.dart';
-import '../widgets/sync_conflict_dialog.dart';
+import '../widgets/sync_conflict_comparison_dialog.dart';
 import '../widgets/transaction_filter_bar.dart';
 import '../widgets/transaction_group_tile.dart';
 import '../widgets/mass_edit_tags_dialog.dart';
@@ -487,14 +487,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                   dateTimeFormatPrefs: ref.watch(dateTimeFormatPrefsProvider),
                   expandedGroupIds: _expandedGroupIds,
                   onToggleGroup: _toggleGroup,
-                  onResolveConflict: (row) => showSyncConflictDialog(
-                    context,
-                    onDismiss: () => ref
-                        .read(domainRepositoryProvider)
-                        .acknowledgeConflict(row.id),
-                    onOpen: () =>
-                        showTransactionForm(context, existing: row.row),
-                  ),
+                  onResolveConflict: (row) =>
+                      showSyncConflictComparison(context, recordId: row.id),
                 )
               : _mobileList(visible, items);
         },
@@ -652,12 +646,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
               ? () => showRecurringTemplateForm(context, from: row.row)
               : null,
           tags: row.tags,
-          onResolveConflict: () => showSyncConflictDialog(
-            context,
-            onDismiss: () =>
-                ref.read(domainRepositoryProvider).acknowledgeConflict(row.id),
-            onOpen: openForEdit,
-          ),
+          onResolveConflict: () =>
+              showSyncConflictComparison(context, recordId: row.id),
         ),
       ),
     );

@@ -225,6 +225,14 @@ final syncCountsProvider = StreamProvider<SyncCounts>(
   (ref) => ref.watch(domainRepositoryProvider).watchSyncCounts(),
 );
 
+final conflictedRecordsProvider = StreamProvider<List<ConflictedRecordRef>>(
+  (ref) => ref.watch(domainRepositoryProvider).watchConflictedRecords(),
+);
+
+final pendingRecordsProvider = StreamProvider<List<PendingRecordRef>>(
+  (ref) => ref.watch(domainRepositoryProvider).watchPendingRecords(),
+);
+
 final transactionFilterProvider = StateProvider<TransactionFilter>(
   (ref) => TransactionFilter.empty,
 );

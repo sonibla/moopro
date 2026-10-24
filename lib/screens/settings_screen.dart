@@ -13,7 +13,7 @@ import '../api/models.dart';
 import '../providers/app_providers.dart';
 import '../providers/auth_controller.dart';
 import '../widgets/hide_amounts_button.dart';
-import '../widgets/sync_conflict_dialog.dart';
+import '../widgets/sync_conflict_comparison_dialog.dart';
 import '../widgets/sync_status_icon.dart';
 import 'backup_screen.dart';
 import 'password_change_screen.dart';
@@ -77,12 +77,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           trailing: SyncStatusIcon(
             recordId: SettingIds.alphavantageApiKey,
-            onTap: () => showSyncConflictDialog(
+            onTap: () => showSyncConflictComparison(
               context,
-              onDismiss: () => ref
-                  .read(domainRepositoryProvider)
-                  .acknowledgeConflict(SettingIds.alphavantageApiKey),
-              onOpen: () => _showApiKeyDialog(apiKeyValue),
+              recordId: SettingIds.alphavantageApiKey,
             ),
           ),
           onTap: () => _showApiKeyDialog(apiKeyValue),

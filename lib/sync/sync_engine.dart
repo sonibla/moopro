@@ -48,6 +48,20 @@ class SyncCounts {
   const SyncCounts({required this.pending, required this.conflicted});
 }
 
+class ConflictedRecordRef {
+  final String id;
+  final String type;
+
+  const ConflictedRecordRef({required this.id, required this.type});
+}
+
+class PendingRecordRef {
+  final String id;
+  final String type;
+
+  const PendingRecordRef({required this.id, required this.type});
+}
+
 class SyncEngine {
   final AppDatabase db;
   final VaultApi vaultApi;
@@ -312,6 +326,28 @@ class SyncEngine {
         conflicted: row.read(conflictedExpr) ?? 0,
       ),
     );
+  }
+
+  Stream<List<ConflictedRecordRef>> watchConflictedRecords() {
+    return (db.select(
+      db.localVaultRecords,
+    )..where((t) => t.conflictedAt.isNotNull())).watch().map(
+      (rows) => [
+        for (final row in rows) ConflictedRecordRef(id: row.id, type: row.type),
+      ],
+    );
+  }
+
+  Stream<List<PendingRecordRef>> watchPendingRecords() {
+    return (db.select(db.localVaultRecords)
+          ..where((t) => t.dirty.equals(true) & t.conflictedAt.isNull()))
+        .watch()
+        .map(
+          (rows) => [
+            for (final row in rows)
+              PendingRecordRef(id: row.id, type: row.type),
+          ],
+        );
   }
 
   Future<void> acknowledgeConflict(String id) async {

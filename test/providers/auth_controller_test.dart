@@ -44,6 +44,26 @@ const _existingVaultUser = UserApiResponse(
   hasVaultKeyMaterial: true,
 );
 
+class _GatedVaultApi extends VaultApi {
+  final Future<void> gate;
+
+  _GatedVaultApi(this.gate) : super(ApiClient());
+
+  @override
+  Future<List<VaultRecordResponse>> pull({required int sinceVersion}) async {
+    await gate;
+    return const [];
+  }
+
+  @override
+  Future<List<VaultRecordResponse>> push(
+    List<VaultRecordUpsert> records,
+  ) async {
+    await gate;
+    return const [];
+  }
+}
+
 class _CloseTrackingAppDatabase extends AppDatabase {
   bool closeCalled = false;
 
@@ -508,6 +528,79 @@ void main() {
       },
     );
 
+    test('logout waits for DomainRepository.awaitIdle() (e.g. an in-flight '
+        'background sync) before invalidating the domain cache — same race, '
+        'same fix as showVaultPicker', () async {
+      final vaultSession = _FakeVaultSessionManager();
+      final fakeAuthApi = _FakeAuthApi();
+      final registry = _testRegistry(
+        VaultRegistryDatabase(NativeDatabase.memory()),
+      );
+      final vault = await registry.createOfflineVault(label: 'Vault');
+      final db = _CloseTrackingAppDatabase();
+      final gate = Completer<void>();
+      final repo = DomainRepository(
+        syncDb: db,
+        cacheDb: DomainCacheDatabase(NativeDatabase.memory()),
+        syncEngine: SyncEngine(db: db, vaultApi: _GatedVaultApi(gate.future)),
+        balanceEngine: BalanceEngine(
+          DomainCacheDatabase(NativeDatabase.memory()),
+        ),
+        vaultSession: vaultSession,
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          vaultRegistryProvider.overrideWithValue(registry),
+          vaultSessionManagerProvider.overrideWithValue(vaultSession),
+          authApiProvider.overrideWithValue(fakeAuthApi),
+          appDatabaseProvider.overrideWith((ref) {
+            ref.watch(activeVaultProvider);
+            return db;
+          }),
+          domainRepositoryProvider.overrideWithValue(repo),
+          authControllerProvider.overrideWith(
+            (ref) => AuthController(
+              ref,
+              crossTabSessionChanges: const Stream<void>.empty(),
+              hasStoredSessionOverride: () async => false,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.read(authControllerProvider);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await container
+          .read(authControllerProvider.notifier)
+          .selectVault(
+            (container.read(authControllerProvider) as AuthNeedsVaultSelection)
+                .vaults
+                .single,
+          );
+      final controller = container.read(authControllerProvider.notifier);
+      await controller.unlockOffline(password: 'correct');
+      expect(container.read(activeVaultProvider)?.id, vault.id);
+
+      unawaited(repo.syncNow());
+
+      var logoutDone = false;
+      final logoutFuture = controller.logout().then((_) {
+        logoutDone = true;
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(logoutDone, isFalse);
+      expect(vaultSession.currentDek, isNotNull);
+
+      gate.complete();
+      await logoutFuture;
+
+      expect(logoutDone, isTrue);
+      expect(vaultSession.currentDek, isNull);
+    });
+
     test('deleteVault refuses to delete the active, unlocked vault', () async {
       final vaultSession = _FakeVaultSessionManager();
       final container = await buildContainer(
@@ -645,6 +738,80 @@ void main() {
       expect(state, isA<AuthNeedsVaultSelection>());
       expect((state as AuthNeedsVaultSelection).vaults, hasLength(2));
     });
+
+    test(
+      'showVaultPicker waits for DomainRepository.awaitIdle() (e.g. an '
+      'in-flight background sync) before closing the database — the fix '
+      'for the single-device "edit then immediately switch account" race',
+      () async {
+        final vaultSession = _FakeVaultSessionManager();
+        final registry = _testRegistry(
+          VaultRegistryDatabase(NativeDatabase.memory()),
+        );
+        final vault = await registry.createOfflineVault(label: 'Offline vault');
+        final db = _CloseTrackingAppDatabase();
+        final cacheDb = DomainCacheDatabase(NativeDatabase.memory());
+        final gate = Completer<void>();
+        final repo = DomainRepository(
+          syncDb: db,
+          cacheDb: cacheDb,
+          syncEngine: SyncEngine(db: db, vaultApi: _GatedVaultApi(gate.future)),
+          balanceEngine: BalanceEngine(cacheDb),
+          vaultSession: vaultSession,
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            vaultRegistryProvider.overrideWithValue(registry),
+            vaultSessionManagerProvider.overrideWithValue(vaultSession),
+            appDatabaseProvider.overrideWith((ref) {
+              ref.watch(activeVaultProvider);
+              return db;
+            }),
+            domainRepositoryProvider.overrideWithValue(repo),
+            authControllerProvider.overrideWith(
+              (ref) => AuthController(
+                ref,
+                crossTabSessionChanges: const Stream<void>.empty(),
+                hasStoredSessionOverride: () async => false,
+              ),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(authControllerProvider);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        await container
+            .read(authControllerProvider.notifier)
+            .selectVault(
+              (container.read(authControllerProvider)
+                      as AuthNeedsVaultSelection)
+                  .vaults
+                  .single,
+            );
+        final controller = container.read(authControllerProvider.notifier);
+        await controller.unlockOffline(password: 'correct');
+        expect(container.read(activeVaultProvider)?.id, vault.id);
+
+        unawaited(repo.syncNow());
+
+        var pickerDone = false;
+        final pickerFuture = controller.showVaultPicker().then((_) {
+          pickerDone = true;
+        });
+
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(pickerDone, isFalse);
+        expect(db.closeCalled, isFalse);
+
+        gate.complete();
+        await pickerFuture;
+
+        expect(pickerDone, isTrue);
+        expect(db.closeCalled, isTrue);
+      },
+    );
   });
 
   group('AuthController "last opened" tracking', () {
@@ -840,6 +1007,13 @@ void main() {
             _FakeVaultSessionManager(),
           ),
           authApiProvider.overrideWithValue(authApi),
+          appDatabaseProvider.overrideWith((ref) {
+            ref.watch(activeVaultProvider);
+            return AppDatabase(NativeDatabase.memory());
+          }),
+          domainCacheDatabaseProvider.overrideWith(
+            (ref) => DomainCacheDatabase(NativeDatabase.memory()),
+          ),
           authControllerProvider.overrideWith(
             (ref) => AuthController(
               ref,

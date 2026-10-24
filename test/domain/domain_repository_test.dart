@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:decimal/decimal.dart';
@@ -121,6 +122,27 @@ class _CountingVaultApi extends FakeVaultApi {
   Future<List<VaultRecordResponse>> push(List<VaultRecordUpsert> records) {
     calls++;
     return super.push(records);
+  }
+}
+
+class _GatedVaultApi extends VaultApi {
+  final Future<void> gate;
+  final FakeVaultApi inner;
+
+  _GatedVaultApi(this.gate, this.inner) : super(ApiClient());
+
+  @override
+  Future<List<VaultRecordResponse>> pull({required int sinceVersion}) async {
+    await gate;
+    return inner.pull(sinceVersion: sinceVersion);
+  }
+
+  @override
+  Future<List<VaultRecordResponse>> push(
+    List<VaultRecordUpsert> records,
+  ) async {
+    await gate;
+    return inner.push(records);
   }
 }
 
@@ -2221,6 +2243,209 @@ void main() {
       await deviceB.syncDb.close();
       await deviceB.cacheDb.close();
     });
+
+    Future<(DomainRepository, MoneyContainer, List<VaultRecordResponse>)>
+    buildConflict() async {
+      final sharedServer = <VaultRecordResponse>[];
+      final deviceA = _buildRepository(
+        AppDatabase(NativeDatabase.memory()),
+        DomainCacheDatabase(NativeDatabase.memory()),
+        FakeVaultApi(sharedServerRecords: sharedServer),
+        dek,
+      );
+      final deviceB = _buildRepository(
+        AppDatabase(NativeDatabase.memory()),
+        DomainCacheDatabase(NativeDatabase.memory()),
+        FakeVaultApi(sharedServerRecords: sharedServer),
+        dek,
+      );
+
+      await deviceA.ensureExternalContainer();
+      await deviceB.ensureExternalContainer();
+
+      final bank = await deviceA.createContainer(
+        name: 'Bank',
+        containerType: ContainerType.holder,
+      );
+      await deviceA.syncNow();
+      await deviceB.syncNow();
+
+      await deviceA.createContainer(
+        id: bank.id,
+        name: 'Bank (renamed by A)',
+        containerType: ContainerType.holder,
+      );
+      await deviceA.syncNow();
+
+      await deviceB.createContainer(
+        id: bank.id,
+        name: 'Bank (renamed by B)',
+        containerType: ContainerType.holder,
+      );
+      await deviceB.syncNow();
+
+      return (deviceB, bank, sharedServer);
+    }
+
+    test('loadConflictComparison exposes both the abandoned local edit and '
+        'the current server version', () async {
+      final (deviceB, bank, _) = await buildConflict();
+
+      final comparison = await deviceB.loadConflictComparison(bank.id);
+      expect(comparison.type, equals(VaultRecordTypes.container));
+      expect(comparison.local, isA<MoneyContainer>());
+      expect(
+        (comparison.local as MoneyContainer).name,
+        equals('Bank (renamed by B)'),
+      );
+      expect(comparison.server, isA<MoneyContainer>());
+      expect(
+        (comparison.server as MoneyContainer).name,
+        equals('Bank (renamed by A)'),
+      );
+
+      await deviceB.syncDb.close();
+      await deviceB.cacheDb.close();
+    });
+
+    test('keepServerVersion clears the conflict and the snapshot, leaving the '
+        'server value in place', () async {
+      final (deviceB, bank, _) = await buildConflict();
+
+      await deviceB.keepServerVersion(bank.id);
+
+      final statuses = await deviceB.watchRecordStatuses().first;
+      expect(statuses[bank.id], equals(RecordSyncStatus.synced));
+
+      final comparison = await deviceB.loadConflictComparison(bank.id);
+      expect(comparison.local, isNull);
+      expect(
+        (comparison.server as MoneyContainer).name,
+        equals('Bank (renamed by A)'),
+      );
+
+      await deviceB.syncDb.close();
+      await deviceB.cacheDb.close();
+    });
+
+    test('keepLocalVersion re-applies the abandoned edit as a brand-new edit, '
+        'leaving the record pending/synced rather than conflicted', () async {
+      final (deviceB, bank, sharedServer) = await buildConflict();
+
+      await deviceB.keepLocalVersion(bank.id);
+
+      final statuses = await deviceB.watchRecordStatuses().first;
+      expect(statuses[bank.id], isNot(equals(RecordSyncStatus.conflicted)));
+
+      final row = await (deviceB.cacheDb.select(
+        deviceB.cacheDb.containers,
+      )..where((t) => t.id.equals(bank.id))).getSingle();
+      expect(row.name, equals('Bank (renamed by B)'));
+
+      await deviceB.syncNow();
+      final afterSync = await deviceB.watchRecordStatuses().first;
+      expect(afterSync[bank.id], equals(RecordSyncStatus.synced));
+      expect(sharedServer.firstWhere((r) => r.id == bank.id).deleted, isFalse);
+
+      await deviceB.syncDb.close();
+      await deviceB.cacheDb.close();
+    });
+
+    test('editing a still-conflicted record again drops the stale snapshot, '
+        'rather than comparing against a now-superseded edit', () async {
+      final (deviceB, bank, _) = await buildConflict();
+
+      expect((await deviceB.loadConflictComparison(bank.id)).local, isNotNull);
+
+      await deviceB.createContainer(
+        id: bank.id,
+        name: 'Bank (renamed by B again, before resolving)',
+        containerType: ContainerType.holder,
+      );
+
+      expect((await deviceB.loadConflictComparison(bank.id)).local, isNull);
+
+      await deviceB.syncDb.close();
+      await deviceB.cacheDb.close();
+    });
+
+    test(
+      'a fresh DomainRepository instance (simulating an app restart) has '
+      'no snapshot — loadConflictComparison falls back to server-only',
+      () async {
+        final (deviceB, bank, sharedServer) = await buildConflict();
+
+        final restarted = _buildRepository(
+          deviceB.syncDb,
+          deviceB.cacheDb,
+          FakeVaultApi(sharedServerRecords: sharedServer),
+          dek,
+        );
+
+        final comparison = await restarted.loadConflictComparison(bank.id);
+        expect(comparison.local, isNull);
+        expect(
+          (comparison.server as MoneyContainer).name,
+          equals('Bank (renamed by A)'),
+        );
+
+        await deviceB.syncDb.close();
+        await deviceB.cacheDb.close();
+      },
+    );
+  });
+
+  group('awaitIdle (vault-teardown race)', () {
+    test('resolves only after an in-flight sync completes', () async {
+      final gate = Completer<void>();
+      final slowRepo = _buildRepository(
+        AppDatabase(NativeDatabase.memory()),
+        DomainCacheDatabase(NativeDatabase.memory()),
+        _GatedVaultApi(gate.future, FakeVaultApi()),
+        dek,
+      );
+      await slowRepo.ensureExternalContainer();
+
+      unawaited(slowRepo.syncNow());
+      var idleCompleted = false;
+      final idleFuture = slowRepo.awaitIdle().then((_) {
+        idleCompleted = true;
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(idleCompleted, isFalse);
+
+      gate.complete();
+      await idleFuture;
+      expect(idleCompleted, isTrue);
+
+      await slowRepo.syncDb.close();
+      await slowRepo.cacheDb.close();
+    });
+
+    test(
+      'resolves cleanly even if the queued sync throws (mirrors '
+      '_syncSoon\'s own swallow — a pure sync point, not an error channel)',
+      () async {
+        final offlineRepo = _buildRepository(
+          AppDatabase(NativeDatabase.memory()),
+          DomainCacheDatabase(NativeDatabase.memory()),
+          _OfflineVaultApi(),
+          dek,
+        );
+        await offlineRepo.ensureExternalContainer();
+
+        unawaited(
+          offlineRepo.syncNow().catchError(
+            (_) => const PullResult(recordsApplied: 0, rollbackWarnings: []),
+          ),
+        );
+        await expectLater(offlineRepo.awaitIdle(), completes);
+
+        await offlineRepo.syncDb.close();
+        await offlineRepo.cacheDb.close();
+      },
+    );
   });
 
   group('recurring templates', () {

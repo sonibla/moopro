@@ -15,7 +15,7 @@ import '../container_form_dialog.dart';
 import '../container_icon.dart';
 import '../container_picker.dart';
 import '../pie_chart_card.dart';
-import '../sync_conflict_dialog.dart';
+import '../sync_conflict_comparison_dialog.dart';
 import '../sync_status_icon.dart';
 import 'container_breakdown_card.dart';
 import 'explorer_data.dart';
@@ -393,12 +393,7 @@ class _ContainerExplorerBodyState extends ConsumerState<ContainerExplorerBody> {
           filterNote: _assetFilter == null ? null : 'filtered',
           rowTrailing: (id) => SyncStatusIcon(
             recordId: id,
-            onTap: () => showSyncConflictDialog(
-              context,
-              onDismiss: () =>
-                  ref.read(domainRepositoryProvider).acknowledgeConflict(id),
-              onOpen: () => _setFocus(id),
-            ),
+            onTap: () => showSyncConflictComparison(context, recordId: id),
           ),
         ),
       ],
