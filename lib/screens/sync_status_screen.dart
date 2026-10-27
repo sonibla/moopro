@@ -1,65 +1,78 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../domain/models.dart' show SettingIds, VaultRecordTypes;
+import '../domain/cache_row_mapping.dart';
+import '../domain/conflict_record_display.dart';
+import '../domain/models.dart' show Setting, VaultRecordTypes;
+import '../domain/recurring_template_mapping.dart' show assetFromCacheRow;
 import '../providers/app_providers.dart';
+import '../widgets/conflict_record_tile.dart';
 import '../widgets/sync_conflict_comparison_dialog.dart';
 import '../widgets/sync_summary_indicator.dart';
-
-const Map<String, String> _settingLabels = {
-  SettingIds.alphavantageApiKey: 'Alphavantage API key',
-  SettingIds.dateFormat: 'Date format',
-  SettingIds.timeFormat: 'Time format',
-  SettingIds.statementImportHintResolutions: 'Statement import hints',
-  SettingIds.defaultCurrencyAssetId: 'Default currency',
-  SettingIds.themeMode: 'Theme',
-  SettingIds.hideAmounts: 'Hide amounts',
-};
 
 class SyncStatusScreen extends ConsumerWidget {
   const SyncStatusScreen({super.key});
 
-  String _labelFor(WidgetRef ref, String type, String id) {
+  Object? _valueFor(WidgetRef ref, String type, String id) {
     switch (type) {
       case VaultRecordTypes.asset:
-        final asset = ref
+        final row = ref
             .watch(assetsStreamProvider)
             .value
             ?.where((a) => a.id == id)
             .firstOrNull;
-        return asset == null ? 'Asset' : '${asset.name} (${asset.symbol})';
+        return row == null ? null : assetFromCacheRow(row);
       case VaultRecordTypes.container:
-        final container = ref
+        final row = ref
             .watch(containersStreamProvider)
             .value
             ?.where((c) => c.id == id)
             .firstOrNull;
-        return container == null ? 'Container' : container.name;
+        return row == null ? null : containerFromCacheRow(row);
       case VaultRecordTypes.transaction:
-        final tx = ref
+        final row = ref
             .watch(transactionsStreamProvider)
             .value
             ?.where((t) => t.id == id)
             .firstOrNull;
-        if (tx == null) return 'Transaction';
-        final note = tx.note;
-        return (note != null && note.isNotEmpty)
-            ? 'Transaction: $note'
-            : 'Transaction (${tx.kind})';
+        return row == null ? null : transactionFromCacheRow(row);
       case VaultRecordTypes.priceSnapshot:
-        final snapshot = ref
+        final row = ref
             .watch(priceSnapshotsStreamProvider)
             .value
             ?.where((p) => p.id == id)
             .firstOrNull;
-        return snapshot == null
-            ? 'Price snapshot'
-            : 'Price snapshot (${snapshot.price})';
+        return row == null ? null : priceSnapshotFromCacheRow(row);
       case VaultRecordTypes.setting:
-        return _settingLabels[id] ?? 'Setting';
+        return Setting(id: id, value: '');
       default:
-        return type;
+        return null;
     }
+  }
+
+  ConflictRecordDisplay _displayFor(
+    BuildContext context,
+    WidgetRef ref,
+    String type,
+    String id,
+  ) {
+    final value = _valueFor(ref, type, id);
+    final containers = (ref.watch(containersStreamProvider).value ?? const [])
+        .map(containerFromCacheRow)
+        .toList();
+    final assets = (ref.watch(assetsStreamProvider).value ?? const [])
+        .map(assetFromCacheRow)
+        .toList();
+    return describeConflictRecord(
+      value,
+      lookups: ConflictLookups(
+        containers: containers,
+        assets: assets,
+        settingLabels: settingDisplayLabels,
+      ),
+      dateTimeFormatPrefs: ref.watch(dateTimeFormatPrefsProvider),
+      brightness: Theme.of(context).brightness,
+    );
   }
 
   @override
@@ -108,20 +121,15 @@ class SyncStatusScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             for (final item in conflicted)
               Card(
-                child: ListTile(
-                  leading: Icon(
-                    Icons.error_outline,
-                    color: theme.colorScheme.error,
-                  ),
-                  title: Text(_labelFor(ref, item.type, item.id)),
-                  subtitle: const Text(
-                    'Changed elsewhere before your edit was saved',
-                  ),
-                  trailing: TextButton(
+                child: ConflictRecordSummaryTile(
+                  display: _displayFor(context, ref, item.type, item.id),
+                  trailingAction: TextButton(
                     onPressed: () =>
                         showSyncConflictComparison(context, recordId: item.id),
                     child: const Text('Review'),
                   ),
+                  onTap: () =>
+                      showSyncConflictComparison(context, recordId: item.id),
                 ),
               ),
             const SizedBox(height: 16),
@@ -133,10 +141,8 @@ class SyncStatusScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             for (final item in pending)
-              ListTile(
-                leading: const Icon(Icons.cloud_upload_outlined),
-                title: Text(_labelFor(ref, item.type, item.id)),
-                subtitle: const Text('Will sync once online'),
+              ConflictRecordSummaryTile(
+                display: _displayFor(context, ref, item.type, item.id),
               ),
           ],
         ],

@@ -9,6 +9,7 @@ import '../domain/transaction_list_grouping.dart';
 import '../domain/transaction_table_columns.dart';
 import '../theme/app_theme.dart';
 import 'amount_text.dart';
+import 'conflict_resolve_button.dart';
 import 'container_icon.dart';
 import 'drag_select_region.dart';
 import 'now_marker.dart';
@@ -474,9 +475,16 @@ class TransactionTable extends StatelessWidget {
             SizedBox(
               width: _syncWidth,
               child: Center(
-                child: SyncStatusIcon(
-                  recordId: row.id,
-                  onTap: () => onResolveConflict(row),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SyncStatusIcon(recordId: row.id),
+                    ConflictResolveButton(
+                      recordId: row.id,
+                      onPressed: () => onResolveConflict(row),
+                      size: _syncWidth,
+                    ),
+                  ],
                 ),
               ),
             ),

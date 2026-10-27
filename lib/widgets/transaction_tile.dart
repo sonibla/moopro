@@ -6,6 +6,7 @@ import '../domain/models.dart';
 import '../domain/transaction_kind_style.dart';
 import '../theme/app_theme.dart';
 import 'amount_text.dart';
+import 'conflict_resolve_button.dart';
 import 'sync_status_icon.dart';
 import 'tag_pill_row.dart';
 import '../domain/calendar_date.dart';
@@ -170,6 +171,11 @@ class TransactionTile extends StatelessWidget {
               tooltip: 'Make recurring',
               onPressed: onMakeRecurring,
             ),
+          if (onResolveConflict != null)
+            ConflictResolveButton(
+              recordId: recordId,
+              onPressed: onResolveConflict,
+            ),
           Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -193,7 +199,7 @@ class TransactionTile extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               const SizedBox(height: 2),
-              SyncStatusIcon(recordId: recordId, onTap: onResolveConflict),
+              SyncStatusIcon(recordId: recordId),
             ],
           ),
         ],

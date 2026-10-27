@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../domain/cache_row_mapping.dart';
+import '../domain/conflict_record_display.dart';
 import '../domain/domain_repository.dart';
-import '../domain/models.dart';
+import '../domain/recurring_template_mapping.dart' show assetFromCacheRow;
 import '../providers/app_providers.dart';
+import 'conflict_record_tile.dart';
 
 Future<void> showSyncConflictComparison(
   BuildContext context, {
@@ -73,7 +76,7 @@ class _SyncConflictComparisonDialogState
                     const Padding(
                       padding: EdgeInsets.only(bottom: 4),
                       child: Text(
-                        "Your previous edit isn't available anymore — you "
+                        "Your previous edit isn't available anymore. You "
                         'can only keep the server version.',
                         style: TextStyle(fontStyle: FontStyle.italic),
                       ),
@@ -120,40 +123,33 @@ class _SyncConflictComparisonDialogState
   }
 }
 
-class _VersionCard extends StatelessWidget {
+class _VersionCard extends ConsumerWidget {
   final String title;
   final Object? value;
 
   const _VersionCard({required this.title, required this.value});
 
-  String _describe(Object? value) {
-    switch (value) {
-      case null:
-        return 'Not available';
-      case Asset a:
-        return '${a.name} (${a.symbol})';
-      case MoneyContainer c:
-        return '${c.name} — ${c.containerType.name}';
-      case MoneyTransaction t:
-        final note = t.note;
-        return '${t.kind.name}: ${t.legOut.quantity} ${t.legOut.assetId} '
-            '→ ${t.legIn.quantity} ${t.legIn.assetId}'
-            '${(note != null && note.isNotEmpty) ? ' — $note' : ''}';
-      case PriceSnapshot p:
-        return '${p.price} (as of ${p.date.toIso8601String().split('T').first})';
-      case Setting s:
-        return s.value;
-      default:
-        return value.toString();
-    }
-  }
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final containers = (ref.watch(containersStreamProvider).value ?? const [])
+        .map(containerFromCacheRow)
+        .toList();
+    final assets = (ref.watch(assetsStreamProvider).value ?? const [])
+        .map(assetFromCacheRow)
+        .toList();
+    final display = describeConflictRecord(
+      value,
+      lookups: ConflictLookups(
+        containers: containers,
+        assets: assets,
+        settingLabels: settingDisplayLabels,
+      ),
+      dateTimeFormatPrefs: ref.watch(dateTimeFormatPrefsProvider),
+      brightness: theme.brightness,
+    );
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         border: Border.all(color: theme.colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(8),
@@ -161,9 +157,11 @@ class _VersionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.labelLarge),
-          const SizedBox(height: 4),
-          Text(_describe(value), style: theme.textTheme.bodyMedium),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Text(title, style: theme.textTheme.labelLarge),
+          ),
+          ConflictRecordSummaryTile(display: display),
         ],
       ),
     );
